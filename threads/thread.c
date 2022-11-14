@@ -232,6 +232,12 @@ thread_create(const char *name, int priority,
 	/* Add to run queue. */
 	thread_unblock (t);
 
+	struct thread *cur_thread = thread_current();
+	if (cur_thread->priority < priority){
+		thread_yield();
+	} 
+	/* 생성된 스레드의 우선순위가 현재 실행중이 스레드의
+우선순위 보다 높다면 CPU를 양보한다. */
 	return tid;
 }
 
@@ -268,9 +274,15 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	//[priority 수정 추가]
+	list_insert_ordered(&ready_list, &t->elem, cmp_priority, &t->priority);
+	/* 스레드가 unblock 될때 우선순위 순으로 정렬 되어
+	ready_list에 삽입되도록 수정 */
+
+	// list_push_back (&ready_list, &t->elem);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -382,14 +394,14 @@ void thread_awake(int64_t ticks)
 
 }
 
-#define LIST_MIN(x, y) ((x) < (y) ? (x) : (y));
+#define MIN(x, y) ((x) < (y) ? (x) : (y));
 
 
 /*next_tick_to_awake가 깨워야 할 스레드중 가장 작은 tick을 갖도록 업데이트한다.*/
 /* Project 1 - Alarm Clock */
 void update_next_tick_to_awake(int64_t ticks) 
 {	
-	next_tick_to_awake = LIST_MIN(next_tick_to_awake,ticks);
+	next_tick_to_awake = MIN(next_tick_to_awake,ticks);
 	// struct list_elem *cur = list_begin(&sleep_list);
 	// struct thread* cur_thread = list_entry(cur, struct thread, elem);
 	// int64_t min_ticks = INT64_MAX;
@@ -424,8 +436,13 @@ thread_yield (void) {
 	ASSERT (!intr_context ());
 
 	old_level = intr_disable ();
+	
 	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
+		// list_push_back (&ready_list, &curr->elem);
+		list_insert_ordered(&ready_list, &curr->elem, &cmp_priority, NULL); // 수정 [priority]
+		/* 현재 thread가 CPU를 양보하여 ready_list에 삽입 될 때
+우선순위 순서로 정렬되어 삽입 되도록 수정 */
+
 	do_schedule (THREAD_READY);
 	intr_set_level (old_level);
 }
@@ -434,9 +451,17 @@ thread_yield (void) {
 /* Project 1 - Priority Scheduling [수정4] 
 스레드의 우선순위가 변경되었을때 우선순위에 따라 선점이 발생하도록 한다.
 */
-void
+
+
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *cur_thread = thread_current();
+	cur_thread->priority = new_priority;
+	// 수정 [priority]
+	list_remove(&cur_thread->elem);
+	list_insert_ordered(&ready_list, &cur_thread->elem, &cmp_priority, NULL);
+	/* 스레드의 우선순위가 변경되었을때 우선순위에 따라
+선점이 발생하도록 한다. */
+
 }
 
 /* Returns the current thread's priority. */
@@ -447,10 +472,30 @@ thread_get_priority (void) {
 
 // [추가1]
 void test_max_priority(void) {
+	struct thread *cur_thread = thread_current();
+	
+	if (!list_empty(&ready_list)){
+		if (cmp_priority(&cur_thread->elem, list_begin(&ready_list), NULL)){
+			do_schedule(THREAD_BLOCKED);
+		}
+	}
+		
+	
 	//ready_list에서 우선순위가 가장 높은 스레드와 현재 스레드의 우선순위를 비교하여 스케줄링 한다. (ready_list 가 비여있지 않은지 확인)
 }
 
+
 bool cmp_priority(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED){
+	struct thread *thread_a = list_entry(a, struct thread, elem);
+	struct thread *thread_b = list_entry(b, struct thread, elem);
+
+	if ((thread_a->priority) < (thread_b->priority)){
+		return true;
+	}
+	else 
+	{
+		return false;
+	}
 	 // 인자로 주어진 스레드들의 우선순위를 비교 
 }
 
